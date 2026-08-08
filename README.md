@@ -6,6 +6,8 @@ Automated pipeline to collect, store, and analyze rental, resale, and new develo
 
 ```
 591_pipeline/
+├── .github/workflows/
+│   └── weekly-591.yml          # GitHub Actions weekly email schedule
 ├── config.yaml                 # All tunable parameters
 ├── scheduled_searches.yaml     # Weekly filtered-search criteria
 ├── render.yaml                 # Render Cron Job definition
@@ -47,7 +49,7 @@ Edit `config.yaml` to adjust:
 
 ## 每週條件搜尋並寄到 Gmail
 
-這個流程不需要 FastAPI，也不需要另外架 API。Render Cron Job 每週直接執行
+這個流程不需要 FastAPI，也不需要另外架 API。GitHub Actions 每週直接執行
 `python src/search_and_email.py`，搜尋完成後透過 Resend 寄一封信及 CSV 附件。
 
 目前 `scheduled_searches.yaml` 已設定為：
@@ -102,18 +104,21 @@ python src/search_and_email.py
 
 `.env` 已列入 `.gitignore`，不要將真正的 API key 提交到 Git。
 
-### 3. 部署成 Render Cron Job
+### 3. 啟用 GitHub Actions 每週排程
 
-1. 將這個專案推送到 GitHub。
-2. 到 [Render Dashboard](https://dashboard.render.com/) 選擇 **New > Blueprint**，
-   連接此 GitHub repository。Render 會讀取根目錄的 `render.yaml`。
-3. 在 Render 填入 `RESEND_API_KEY` 與 `EMAIL_TO`；不要把秘密寫入 YAML。
-4. 建立後先使用 **Manual Trigger** 測試一次，確認 Gmail 收到信與 CSV。
+1. 將專案及 `.github/workflows/weekly-591.yml` 推送到 GitHub 的預設分支。
+2. 在 repository 開啟 **Settings > Secrets and variables > Actions**。
+3. 新增 repository secrets：
+   - `RESEND_API_KEY`：Resend 建立的 `re_...` 金鑰。
+   - `EMAIL_TO`：接收郵件的 Gmail。
+4. 開啟 **Actions > Weekly 591 Search Email > Run workflow** 手動測試。
 
-`render.yaml` 的排程是 `0 0 * * 1`（UTC），換算為台灣時間是每週一上午
-08:00。Render Cron Job 目前不是完全免費服務，部署前請在 Render 畫面確認
-[Cron Job pricing](https://render.com/docs/cronjobs#pricing)。Render 的檔案系統不會
-永久保存，但本流程會在同一次執行中把 CSV 寄出，因此不受影響。
+Workflow 使用 `Asia/Taipei` 時區，每週一上午 08:00 執行。它會先安裝套件並跑
+測試；測試成功後才搜尋 591 及寄信。CSV 在同一次執行中直接作為郵件附件寄出，
+不依賴 GitHub runner 的暫存檔案。
+
+根目錄的 `render.yaml` 保留為付費 Render Cron Job 的替代方案；使用 GitHub
+Actions 時不需要在 Render 建立任何服務。
 
 ### 修改搜尋條件
 
@@ -253,8 +258,8 @@ crontab -e
 | **GitHub Actions** | Cloud-hosted, cross-machine | Needs repo push, IP may get blocked |
 | **Claude scheduled task** | Easy setup | Costs tokens, may timeout |
 
-**Recommendation**: Use Render Cron for the filtered Gmail report described above.
-Use launchd when the full data pipeline should run locally and the Mac is available.
+**Recommendation**: Use GitHub Actions for the filtered Gmail report described above.
+Use Render Cron as a paid alternative, or launchd when the full data pipeline should run locally.
 
 ## API Endpoints Discovered
 
