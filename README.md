@@ -290,3 +290,4 @@ Use launchd when the full data pipeline should run locally and the Mac is availa
 3. Existing `data/raw/` snapshots carry over — `process_weekly.py` reads all historical snapshots for trend analysis
 4. Adjust `config.yaml` paths if needed
 # 591grab
+# 591grab
