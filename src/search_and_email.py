@@ -47,6 +47,7 @@ SEARCH_KEYS = {
     "city",
     "section_id",
     "district",
+    "districts",
     "price_min_wan",
     "price_max_wan",
     "rooms_min",
@@ -54,6 +55,7 @@ SEARCH_KEYS = {
     "posted_within_days",
     "max_pages",
 }
+DISTRICT_KEYS = {"section_id", "name"}
 
 # Keep the listing URL as the only URL column. This prevents spreadsheet apps
 # from visually combining it with a photo URL and producing a broken link.
@@ -118,6 +120,98 @@ def load_search_config(path: Path) -> dict[str, Any]:
     return config
 
 
+def _normalize_districts(
+    search: dict[str, Any], search_id: str
+) -> list[dict[str, Any]]:
+    """Validate old/new district syntax and return stable ID/name pairs."""
+
+    has_multi = "districts" in search
+    has_legacy_section = search.get("section_id") not in (None, "")
+    has_legacy_name = search.get("district") not in (None, "")
+    has_any_legacy = "section_id" in search or "district" in search
+
+    if has_multi and has_any_legacy:
+        raise ValueError(
+            f"搜尋 {search_id} 的 districts 不可與 section_id / district 同時使用"
+        )
+
+    if has_multi:
+        raw_districts = search.get("districts")
+        if not isinstance(raw_districts, list) or not raw_districts:
+            raise ValueError(f"搜尋 {search_id} 的 districts 必須是非空白清單")
+    else:
+        if not has_legacy_section or not has_legacy_name:
+            raise ValueError(
+                f"搜尋 {search_id} 必須設定 districts，"
+                "或同時設定 section_id 與 district"
+            )
+        raw_districts = [
+            {"section_id": search["section_id"], "name": search["district"]}
+        ]
+
+    districts: list[dict[str, Any]] = []
+    seen_section_ids: set[int] = set()
+    seen_names: set[str] = set()
+    for district_index, raw_district in enumerate(raw_districts, start=1):
+        if not isinstance(raw_district, dict):
+            raise ValueError(
+                f"搜尋 {search_id} 的 districts 第 {district_index} 筆必須是 object"
+            )
+        unknown = set(raw_district) - DISTRICT_KEYS
+        if unknown:
+            raise ValueError(
+                f"搜尋 {search_id} 的 districts 第 {district_index} 筆含有未知欄位："
+                + ", ".join(sorted(unknown))
+            )
+        if raw_district.get("section_id") in (None, ""):
+            raise ValueError(
+                f"搜尋 {search_id} 的 districts 第 {district_index} 筆缺少 section_id"
+            )
+        if raw_district.get("name") in (None, ""):
+            raise ValueError(
+                f"搜尋 {search_id} 的 districts 第 {district_index} 筆缺少 name"
+            )
+        raw_section_id = raw_district["section_id"]
+        if isinstance(raw_section_id, bool):
+            raise ValueError(
+                f"搜尋 {search_id} 的 districts 第 {district_index} 筆 section_id 格式不正確"
+            )
+        if isinstance(raw_section_id, int):
+            section_id = raw_section_id
+        elif isinstance(raw_section_id, str) and re.fullmatch(
+            r"[0-9]+", raw_section_id.strip()
+        ):
+            section_id = int(raw_section_id.strip())
+        else:
+            raise ValueError(
+                f"搜尋 {search_id} 的 districts 第 {district_index} 筆 section_id 格式不正確"
+            )
+
+        raw_name = raw_district["name"]
+        if not isinstance(raw_name, str):
+            raise ValueError(
+                f"搜尋 {search_id} 的 districts 第 {district_index} 筆 name 必須是文字"
+            )
+        name = raw_name.strip()
+        if section_id < 1:
+            raise ValueError(
+                f"搜尋 {search_id} 的 districts 第 {district_index} 筆 section_id 必須大於 0"
+            )
+        if not name:
+            raise ValueError(
+                f"搜尋 {search_id} 的 districts 第 {district_index} 筆 name 不可為空"
+            )
+        if section_id in seen_section_ids:
+            raise ValueError(f"搜尋 {search_id} 的行政區 ID 重複：{section_id}")
+        if name in seen_names:
+            raise ValueError(f"搜尋 {search_id} 的行政區名稱重複：{name}")
+        seen_section_ids.add(section_id)
+        seen_names.add(name)
+        districts.append({"section_id": section_id, "name": name})
+
+    return districts
+
+
 def validate_searches(config: dict[str, Any]) -> list[dict[str, Any]]:
     unknown_top_level = set(config) - TOP_LEVEL_KEYS
     if unknown_top_level:
@@ -165,14 +259,14 @@ def validate_searches(config: dict[str, Any]) -> list[dict[str, Any]]:
         if search_id in seen_ids:
             raise ValueError(f"搜尋 id 重複：{search_id}")
         seen_ids.add(search_id)
+        search["id"] = search_id
 
-        for key in ("region_id", "section_id", "city", "district", "rooms_min"):
+        for key in ("region_id", "city", "rooms_min"):
             if search.get(key) in (None, ""):
                 raise ValueError(f"搜尋 {search_id} 缺少必要欄位：{key}")
 
         try:
             search["region_id"] = int(search["region_id"])
-            search["section_id"] = int(search["section_id"])
             search["rooms_min"] = int(search["rooms_min"])
             search["max_pages"] = int(search.get("max_pages", 20))
         except (TypeError, ValueError) as exc:
@@ -182,6 +276,12 @@ def validate_searches(config: dict[str, Any]) -> list[dict[str, Any]]:
             raise ValueError(f"搜尋 {search_id} 的 rooms_min 必須至少為 1")
         if search["max_pages"] < 1:
             raise ValueError(f"搜尋 {search_id} 的 max_pages 必須至少為 1")
+
+        search["districts"] = _normalize_districts(search, search_id)
+        # Downstream code uses one canonical shape even when an older config
+        # supplied the single-district section_id / district fields.
+        search.pop("section_id", None)
+        search.pop("district", None)
 
         for key in ("price_min_wan", "price_max_wan"):
             if search.get(key) is not None:
@@ -230,11 +330,10 @@ def validate_searches(config: dict[str, Any]) -> list[dict[str, Any]]:
             r"[\r\n]+", " ", str(search.get("name") or search_id)
         ).strip()
         search["city"] = str(search["city"]).strip()
-        search["district"] = str(search["district"]).strip()
         if not search["name"]:
             search["name"] = search_id
-        if not search["city"] or not search["district"]:
-            raise ValueError(f"搜尋 {search_id} 的 city 與 district 不可為空")
+        if not search["city"]:
+            raise ValueError(f"搜尋 {search_id} 的 city 不可為空")
         enabled.append(search)
 
     if not enabled:
@@ -284,12 +383,18 @@ def build_room_query(rooms_min: int) -> str:
 def build_query_params(
     search: dict[str, Any], per_page: int, first_row: int, total_rows: int
 ) -> dict[str, Any]:
+    section_ids = [district["section_id"] for district in search["districts"]]
+    section_query: int | str = (
+        section_ids[0]
+        if len(section_ids) == 1
+        else ",".join(str(section_id) for section_id in section_ids)
+    )
     params: dict[str, Any] = {
         "type": 2,
         "category": 1,
         "shType": "list",
         "regionid": search["region_id"],
-        "section": search["section_id"],
+        "section": section_query,
         "pattern": build_room_query(search["rooms_min"]),
         "firstRow": first_row,
         "totalRows": total_rows,
@@ -352,15 +457,24 @@ def normalize_scheduled_item(
 def row_matches_search(
     row: dict[str, Any], search: dict[str, Any], cutoff: date | None
 ) -> bool:
-    # The API occasionally inserts promoted/recommended rows. Always enforce the
-    # human-readable district again after normalization.
+    # The API occasionally inserts promoted/recommended rows. Always enforce an
+    # allowed section ID/name pair again after normalization.
     if str(row.get("city") or "").strip() != search["city"]:
         return False
-    if str(row.get("district") or "").strip() != search["district"]:
+
+    allowed_by_id = {
+        str(district["section_id"]): district["name"]
+        for district in search["districts"]
+    }
+    district_name = str(row.get("district") or "").strip()
+    if district_name not in allowed_by_id.values():
         return False
 
     section_id = row.get("section_id")
-    if section_id not in (None, "") and str(section_id) != str(search["section_id"]):
+    if (
+        section_id not in (None, "")
+        and allowed_by_id.get(str(section_id)) != district_name
+    ):
         return False
 
     try:
@@ -576,8 +690,11 @@ def criteria_text(search: dict[str, Any], run_date: date) -> str:
 
     cutoff = resolve_cutoff(search, run_date)
     posted = f"{cutoff.isoformat()} 起刊登" if cutoff else "刊登日不限"
+    district_names = "、".join(
+        district["name"] for district in search["districts"]
+    )
     return (
-        f"{search['city']}{search['district']}；{price}；"
+        f"{search['city']}{district_names}；{price}；"
         f"{search['rooms_min']} 房以上；{posted}"
     )
 
