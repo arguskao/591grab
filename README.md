@@ -52,12 +52,12 @@ Edit `config.yaml` to adjust:
 這個流程不需要 FastAPI，也不需要另外架 API。GitHub Actions 每週直接執行
 `python src/search_and_email.py`，搜尋完成後透過 Resend 寄一封信及 CSV 附件。
 
-目前 `scheduled_searches.yaml` 已設定為：
+目前 `scheduled_searches.yaml` 已設定為一組三區合併搜尋：
 
-- 台南市東區
+- 台南市東區、仁德區、中西區
 - 總價 600–1200 萬（包含 600 與 1200）
 - 5 房以上
-- 2026-07-01 起刊登（包含當日）
+- 最近 14 個台灣日曆日（包含執行日）
 
 591 偶爾會在搜尋結果混入推薦物件，因此程式還會在本機逐筆確認行政區、
 總價、房數與刊登日。CSV 不包含圖片網址，`listing_url` 會維持為單一、可直接
@@ -127,23 +127,35 @@ Actions 時不需要在 Render 建立任何服務。
 | 欄位 | 用途 |
 |---|---|
 | `region_id` / `city` | 縣市 ID 與名稱 |
-| `section_id` / `district` | 行政區 ID 與名稱 |
+| `districts` | 一組或多組行政區；每組包含 `section_id` 與 `name` |
 | `price_min_wan` / `price_max_wan` | 總價下限與上限，單位為萬 |
 | `rooms_min` | 最少房數 |
 | `posted_since` | 固定起始日，格式 `YYYY-MM-DD` |
 | `posted_within_days` | 最近幾個台灣日曆日，包含執行日 |
 | `enabled` | 設為 `false` 可暫停該組搜尋 |
 
-`posted_since` 與 `posted_within_days` 只能擇一。現在使用固定
-`posted_since: "2026-07-01"`，所以同一個仍在架上的物件可能每週重複出現；若只想
-看最近一週，請刪除 `posted_since`，改成：
+`posted_since` 與 `posted_within_days` 只能擇一。目前使用
+`posted_within_days: 14`。若只想看最近一週，可改成：
 
 ```yaml
 posted_within_days: 7
 ```
 
-需要同時搜尋不同條件時，可複製整組 `searches` 項目並給它不同的 ASCII `id`。
-每週仍只寄一封信，每組搜尋各附一份 CSV。
+同一組條件要搜尋多區時，直接在 `districts` 加入行政區；591 會以同一組多區條件
+查詢，並產生一份合併 CSV。例如：
+
+```yaml
+districts:
+  - section_id: 206
+    name: "東區"
+  - section_id: 219
+    name: "仁德區"
+  - section_id: 208
+    name: "中西區"
+```
+
+只有價位、房數或日期等條件不同時，才需要複製整組 `searches` 項目並給它不同的
+ASCII `id`。每週仍只寄一封信，每組搜尋各附一份 CSV。
 
 ## Running the Scrapers
 

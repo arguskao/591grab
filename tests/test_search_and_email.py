@@ -37,8 +37,34 @@ def base_search(**overrides):
     return search
 
 
+def multi_search(**overrides):
+    search = {
+        "id": "tainan_three_districts_5plus",
+        "name": "台南三區",
+        "enabled": True,
+        "region_id": 15,
+        "city": "台南市",
+        "districts": [
+            {"section_id": 206, "name": "東區"},
+            {"section_id": 219, "name": "仁德區"},
+            {"section_id": 208, "name": "中西區"},
+        ],
+        "price_min_wan": 600,
+        "price_max_wan": 1200,
+        "rooms_min": 5,
+        "posted_since": "2026-07-01",
+        "max_pages": 20,
+    }
+    search.update(overrides)
+    return search
+
+
 def validated_search(**overrides):
     return app.validate_searches({"searches": [base_search(**overrides)]})[0]
+
+
+def validated_multi_search(**overrides):
+    return app.validate_searches({"searches": [multi_search(**overrides)]})[0]
 
 
 def raw_listing(listing_id, *, timestamp=None, **overrides):
@@ -85,6 +111,27 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(search["region_id"], 15)
         self.assertEqual(search["price_min_wan"], 600.0)
         self.assertEqual(search["posted_since"], "2026-07-01")
+        self.assertEqual(
+            search["districts"], [{"section_id": 206, "name": "東區"}]
+        )
+        self.assertNotIn("section_id", search)
+        self.assertNotIn("district", search)
+        self.assertEqual(
+            app.validate_searches({"searches": [search]})[0]["districts"],
+            search["districts"],
+        )
+
+    def test_validates_multi_district_search(self):
+        search = validated_multi_search()
+        self.assertEqual(
+            [district["section_id"] for district in search["districts"]],
+            [206, 219, 208],
+        )
+
+    def test_live_config_loads_and_validates_without_fixing_user_conditions(self):
+        config = app.load_search_config(ROOT / "scheduled_searches.yaml")
+        configured = app.validate_searches(config)
+        self.assertTrue(configured)
 
     def test_rejects_unknown_key_and_path_traversal_id(self):
         with self.assertRaisesRegex(ValueError, "未知欄位"):
@@ -106,6 +153,61 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "只能擇一"):
             app.validate_searches(
                 {"searches": [base_search(posted_within_days=7)]}
+            )
+
+    def test_rejects_invalid_multi_district_shapes(self):
+        with self.assertRaisesRegex(ValueError, "不可與"):
+            app.validate_searches(
+                {
+                    "searches": [
+                        base_search(
+                            districts=[{"section_id": 206, "name": "東區"}]
+                        )
+                    ]
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "非空白清單"):
+            app.validate_searches({"searches": [multi_search(districts=[])]})
+        invalid_cases = [
+            ("非空白清單", "206,219"),
+            ("必須是 object", [206]),
+            ("未知欄位", [{"section_id": 206, "name": "東區", "code": 1}]),
+            ("缺少 name", [{"section_id": 206}]),
+            ("格式不正確", [{"section_id": 206.5, "name": "東區"}]),
+            ("必須大於 0", [{"section_id": 0, "name": "東區"}]),
+            ("name 必須是文字", [{"section_id": 206, "name": True}]),
+        ]
+        for message, districts in invalid_cases:
+            with self.subTest(message=message, districts=districts):
+                with self.assertRaisesRegex(ValueError, message):
+                    app.validate_searches(
+                        {"searches": [multi_search(districts=districts)]}
+                    )
+        with self.assertRaisesRegex(ValueError, "行政區 ID 重複"):
+            app.validate_searches(
+                {
+                    "searches": [
+                        multi_search(
+                            districts=[
+                                {"section_id": 206, "name": "東區"},
+                                {"section_id": 206, "name": "仁德區"},
+                            ]
+                        )
+                    ]
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "行政區名稱重複"):
+            app.validate_searches(
+                {
+                    "searches": [
+                        multi_search(
+                            districts=[
+                                {"section_id": 206, "name": "東區"},
+                                {"section_id": 219, "name": "東區"},
+                            ]
+                        )
+                    ]
+                }
             )
 
     def test_location_mapping_must_match_pipeline_config(self):
@@ -136,6 +238,10 @@ class QueryAndFilterTests(unittest.TestCase):
         relative = validated_search(posted_since=None, posted_within_days=7)
         params = app.build_query_params(relative, 30, 0, 0)
         self.assertEqual(params["publish_day"], 7)
+
+        multi = validated_multi_search()
+        params = app.build_query_params(multi, 30, 0, 0)
+        self.assertEqual(params["section"], "206,219,208")
 
     def test_room_buckets(self):
         self.assertEqual(app.build_room_query(4), "4,5")
@@ -190,6 +296,59 @@ class QueryAndFilterTests(unittest.TestCase):
         row["posted_date"] = "2026-06-30"
         self.assertFalse(
             app.row_matches_search(row, self.search, date(2026, 7, 1))
+        )
+
+    def test_multi_district_filter_requires_an_allowed_id_name_pair(self):
+        search = validated_multi_search()
+        for listing_id, section_id, name in (
+            (201, 206, "東區"),
+            (202, 219, "仁德區"),
+            (203, 208, "中西區"),
+        ):
+            row = app.normalize_scheduled_item(
+                raw_listing(
+                    listing_id, section_id=section_id, section_name=name
+                ),
+                search,
+                self.taipei,
+                self.run_date,
+            )
+            self.assertTrue(
+                app.row_matches_search(row, search, date(2026, 7, 1))
+            )
+
+        name_only = app.normalize_scheduled_item(
+            raw_listing(206, section_id=None, section_name="仁德區"),
+            search,
+            self.taipei,
+            self.run_date,
+        )
+        self.assertTrue(
+            app.row_matches_search(name_only, search, date(2026, 7, 1))
+        )
+
+        wrong_pair = app.normalize_scheduled_item(
+            raw_listing(204, section_id=219, section_name="東區"),
+            search,
+            self.taipei,
+            self.run_date,
+        )
+        self.assertFalse(
+            app.row_matches_search(wrong_pair, search, date(2026, 7, 1))
+        )
+
+        outside = app.normalize_scheduled_item(
+            raw_listing(205, section_id=207, section_name="南區"),
+            search,
+            self.taipei,
+            self.run_date,
+        )
+        self.assertFalse(
+            app.row_matches_search(outside, search, date(2026, 7, 1))
+        )
+        self.assertIn(
+            "台南市東區、仁德區、中西區",
+            app.criteria_text(search, self.run_date),
         )
 
 
