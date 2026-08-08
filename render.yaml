@@ -1,0 +1,16 @@
+services:
+  - type: cron
+    name: weekly-591-search-email
+    runtime: python
+    plan: starter
+    region: singapore
+    schedule: "0 0 * * 1"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python src/search_and_email.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_TO
+        sync: false

@@ -1,0 +1,32 @@
+# 每週寄信搜尋設定
+#
+# 修改條件時只需要編輯這個檔案。可以複製一組 search 來同時搜尋多個區域，
+# 或將 enabled 改成 false 暫停其中一組。
+
+timezone: "Asia/Taipei"
+output_dir: "data/output/scheduled"
+
+email:
+  subject_prefix: "591 每週物件"
+  preview_limit: 10
+
+searches:
+  - id: "tainan_east_5plus"
+    name: "台南市東區｜600–1200 萬｜5 房以上"
+    enabled: true
+    region_id: 15
+    city: "台南市"
+    section_id: 206
+    district: "東區"
+    price_min_wan: 600
+    price_max_wan: 1200
+    rooms_min: 5
+
+    # 固定起始日：保留目前要求的 2026/7/1 以後（含當日）。
+    posted_since: "2026-07-01"
+
+    # 如果日後只想看最近幾天，刪除 posted_since，再啟用下一行：
+    # posted_within_days: 7
+
+    # 防止 API 異常時無限翻頁；一般精確搜尋只會用到少數頁。
+    max_pages: 20
