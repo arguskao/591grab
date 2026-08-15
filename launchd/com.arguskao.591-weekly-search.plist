@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.arguskao.591-weekly-search</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/Volumes/Xcode2/Code2/591/taiwan-home-listing-data-scraper-591/scripts/run_weekly_search.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Volumes/Xcode2/Code2/591/taiwan-home-listing-data-scraper-591</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>/Volumes/Xcode2/Code2/591/taiwan-home-listing-data-scraper-591/logs/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Volumes/Xcode2/Code2/591/taiwan-home-listing-data-scraper-591/logs/launchd_stderr.log</string>
+</dict>
+</plist>
